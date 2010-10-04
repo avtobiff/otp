@@ -84,6 +84,8 @@ description_txt(?DECOMPRESSION_FAILURE) ->
     "decompression failure";
 description_txt(?HANDSHAKE_FAILURE) ->
     "handshake failure";
+description_txt(?NO_CERTIFICATE) ->
+    "no certificate";
 description_txt(?BAD_CERTIFICATE) ->
     "bad certificate";
 description_txt(?UNSUPPORTED_CERTIFICATE) ->
