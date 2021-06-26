@@ -42,7 +42,7 @@
 	 set_server_verify_data/3,
          set_max_fragment_length/2,
 	 empty_connection_state/2,
-	 empty_connection_state/3,
+	 empty_connection_state/4,
          record_protocol_role/1,
          step_encryption_state/1,
          step_encryption_state_read/1,
@@ -465,10 +465,12 @@ nonce_seed(_,_, CipherState) ->
 
 empty_connection_state(ConnectionEnd, BeastMitigation) ->
     MaxEarlyDataSize = ssl_config:get_max_early_data_size(),
-    empty_connection_state(ConnectionEnd, BeastMitigation, MaxEarlyDataSize).
+    empty_connection_state(ConnectionEnd, _Version = undefined,
+                           BeastMitigation, MaxEarlyDataSize).
 %%
-empty_connection_state(ConnectionEnd, BeastMitigation, MaxEarlyDataSize) ->
-    SecParams = empty_security_params(ConnectionEnd),
+empty_connection_state(ConnectionEnd, Version,
+                       BeastMitigation, MaxEarlyDataSize) ->
+    SecParams = empty_security_params(ConnectionEnd, Version),
     #{security_parameters => SecParams,
       beast_mitigation => BeastMitigation,
       compression_state  => undefined,
@@ -483,13 +485,31 @@ empty_connection_state(ConnectionEnd, BeastMitigation, MaxEarlyDataSize) ->
       early_data_limit => false
      }.
 
-empty_security_params(ConnectionEnd = ?CLIENT) ->
+%% TLS 1.3 and later
+empty_security_params(ConnectionEnd = ?CLIENT, {Major, Minor})
+  when Major > 3 orelse Major =:= 3 andalso Minor >= 4  ->
     #security_parameters{connection_end = ConnectionEnd,
                          client_random = random()};
+empty_security_params(ConnectionEnd = ?SERVER, {Major, Minor})
+  when Major > 3 orelse Major =:= 3 andalso Minor >= 4  ->
+    #security_parameters{connection_end = ConnectionEnd,
+                         server_random = random()};
+empty_security_params(ConnectionEnd, _Version) ->
+    empty_security_params(ConnectionEnd).
+
+%% TLS 1.2 and earlier
+empty_security_params(ConnectionEnd = ?CLIENT) ->
+    #security_parameters{connection_end = ConnectionEnd,
+                         client_random = random_legacy()};
 empty_security_params(ConnectionEnd = ?SERVER) ->
     #security_parameters{connection_end = ConnectionEnd,
-                         server_random = random()}.
+                         server_random = random_legacy()}.
+
+
 random() ->
+    ssl_cipher:random_bytes(32).
+
+random_legacy() ->
     Secs_since_1970 = calendar:datetime_to_gregorian_seconds(
 			calendar:universal_time()) - 62167219200,
     Random_28_bytes = ssl_cipher:random_bytes(28),

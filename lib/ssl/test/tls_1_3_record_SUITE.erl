@@ -40,7 +40,9 @@
          '1_RTT_handshake'/0,
          '1_RTT_handshake'/1,
          '0_RTT_handshake'/0,
-         '0_RTT_handshake'/1
+         '0_RTT_handshake'/1,
+         random_nonce/0,
+         random_nonce/1
         ]).
 
 %%--------------------------------------------------------------------
@@ -51,7 +53,8 @@ all() ->
     [encode_decode,
      finished_verify_data,
      '1_RTT_handshake',
-     '0_RTT_handshake'].
+     '0_RTT_handshake',
+     random_nonce].
 
 init_per_suite(Config) ->
     catch crypto:stop(),
@@ -1423,6 +1426,87 @@ finished_verify_data(_Config) ->
 
     FinishedKey = tls_v1:finished_key(BaseKey, sha256),
     VerifyData = tls_v1:finished_verify_data(FinishedKey, sha256, Messages).
+
+
+%%--------------------------------------------------------------------
+random_nonce() ->
+     [{doc,"Test TLS 1.3 random nonce"}].
+
+random_nonce(_Config) ->
+    %% Test that the first four bytes of the random nonce is not
+    %% defined by unix epoch. Basic idea: Generate ten (10) random
+    %% nonces and compare mean with unix epoch, there should be
+    %% significant differences between TLS 1.2 and TLS 1.3.
+    %% TODO
+    %% * A better test would be to mock ssl_record:random/0 and
+    %%   ssl_record:random_legacy/0 and feed them known values and
+    %%   test against those.
+    %% * Add system level test, creating a socket and verifying
+    %%   the server hello random nonce is 32 bytes random when the
+    %%   server is configured to support TLS 1.3. This has been
+    %%   tested manually.
+
+    N = 10,
+    EpochThreshold = 10,     %% seconds
+    RndThreshold   = 10000,  %% "random"
+
+    %% TLSv1.2
+    %% Test that the first four bytes are unix epoch.
+
+    ClientSecs_1_2 = mean(fun secs_since_1970/0, N),
+    ClientNonce_1_2 = mean(fun client_random_nonce_1_2/0, N),
+    true = abs(ClientSecs_1_2 - ClientNonce_1_2) < EpochThreshold,
+
+    ServerSecs_1_2 = mean(fun secs_since_1970/0, N),
+    ServerNonce_1_2 = mean(fun server_random_nonce_1_2/0, N),
+    true = abs(ServerSecs_1_2 - ServerNonce_1_2) < EpochThreshold,
+
+
+    %% TLSv1.3
+    %% Test that the first four bytes are not unix epoch.
+
+    ClientSecs_1_3 = mean(fun secs_since_1970/0, N),
+    ClientNonce_1_3 = mean(fun client_random_nonce_1_3/0, N),
+    true = abs(ClientSecs_1_3 - ClientNonce_1_3) > RndThreshold,
+
+    ServerSecs_1_3 = mean(fun secs_since_1970/0, N),
+    ServerNonce_1_3 = mean(fun server_random_nonce_1_3/0, N),
+    true = abs(ServerSecs_1_3 - ServerNonce_1_3) > RndThreshold,
+
+    ok.
+
+
+mean(ValueF, N) ->
+    lists:sum([ValueF() || _ <- lists:seq(1,N)]) div N.
+
+secs_since_1970() ->
+    calendar:datetime_to_gregorian_seconds(
+        calendar:universal_time()) - 62167219200.
+
+client_random_nonce_1_2() -> random_nonce(client, {3,3}).
+server_random_nonce_1_2() -> random_nonce(server, {3,3}).
+
+client_random_nonce_1_3() -> random_nonce(client, {3,4}).
+server_random_nonce_1_3() -> random_nonce(server, {3,4}).
+
+
+random_nonce(client, Version) ->
+    #{pending_write :=
+      #{security_parameters :=
+        #security_parameters{client_random = ClientRandom}}} =
+            tls_record:init_connection_states(client, Version, disabled),
+
+    <<FourBytes:32, _/binary>> = ClientRandom,
+    FourBytes;
+
+random_nonce(server, Version) ->
+    #{pending_write :=
+      #{security_parameters :=
+        #security_parameters{server_random = ServerRandom}}} =
+            tls_record:init_connection_states(server, Version, disabled),
+
+    <<FourBytes:32, _/binary>> = ServerRandom,
+    FourBytes.
 
 %%--------------------------------------------------------------------
 %% Internal functions ------------------------------------------------
